@@ -1,0 +1,66 @@
+# Thanos Query: the global view.
+#
+# It connects to every StoreAPI endpoint it is told about, fans a query out
+# to all of them, merges the results and deduplicates by --query.replica-label.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thanos-query
+  namespace: monitoring
+  labels:
+    app: thanos-query
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: thanos-query
+  template:
+    metadata:
+      labels:
+        app: thanos-query
+    spec:
+      containers:
+        - name: thanos-query
+          image: quay.io/thanos/thanos:v0.36.1
+          args:
+            - query
+            - --http-address=0.0.0.0:10902
+            - --grpc-address=0.0.0.0:10901
+            # One endpoint per sidecar. TASK 18 adds the store gateway here.
+            - --endpoint=prometheus-a.monitoring.svc.cluster.local:10901
+            - --endpoint=prometheus-b.monitoring.svc.cluster.local:10901
+            # THE line that makes deduplication work.
+            - --query.replica-label=replica
+          ports:
+            - name: http
+              containerPort: 10902
+            - name: grpc
+              containerPort: 10901
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: thanos-query
+  namespace: monitoring
+  labels:
+    app: thanos-query
+spec:
+  type: ClusterIP
+  selector:
+    app: thanos-query
+  ports:
+    - name: http
+      port: 10902
+      targetPort: http

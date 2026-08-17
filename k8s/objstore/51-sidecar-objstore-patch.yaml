@@ -1,0 +1,27 @@
+# Task 17 applies this to BOTH prometheus deployments:
+#
+#   kubectl patch deployment prometheus-a -n monitoring --patch-file 51-sidecar-objstore-patch.yaml
+#   kubectl patch deployment prometheus-b -n monitoring --patch-file 51-sidecar-objstore-patch.yaml
+#
+# It adds one flag to the sidecar (--objstore.config-file) and mounts the
+# secret holding the bucket credentials. That single flag is what turns the
+# sidecar from "serve recent data" into "serve recent data AND upload blocks".
+spec:
+  template:
+    spec:
+      containers:
+        - name: thanos-sidecar
+          args:
+            - sidecar
+            - --prometheus.url=http://localhost:9090
+            - --tsdb.path=/prometheus
+            - --grpc-address=0.0.0.0:10901
+            - --http-address=0.0.0.0:10902
+            - --objstore.config-file=/etc/thanos/objstore.yml
+          volumeMounts:
+            - name: objstore
+              mountPath: /etc/thanos
+      volumes:
+        - name: objstore
+          secret:
+            secretName: thanos-objstore

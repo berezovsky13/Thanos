@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 5s
+  # These labels are what makes Thanos work. Every metric this Prometheus
+  # stores gets stamped with them, so Thanos can tell the two instances
+  # apart - and then deduplicate them.
+  external_labels:
+    cluster: demo
+    replica: a
+
+scrape_configs:
+  # Both Prometheus instances scrape THE SAME target. That is the point:
+  # two independent copies of identical data.
+  - job_name: podinfo
+    static_configs:
+      - targets: ["podinfo:9898"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -1,0 +1,116 @@
+# Prometheus + Thanos sidecar in ONE pod.
+#
+# They must share a pod because the sidecar reads the same TSDB directory
+# and talks to Prometheus over localhost. This is the standard pattern.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-b
+  namespace: monitoring
+  labels:
+    app: prometheus
+    replica: b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+      replica: b
+  template:
+    metadata:
+      labels:
+        app: prometheus
+        replica: b
+        thanos-store-api: "true"     # used by Task 8
+    spec:
+      # BOTH containers must run as the SAME user. The sidecar uploads by
+      # hard-linking Prometheus' block files into a staging directory, and
+      # Linux refuses to hard-link a file you do not own
+      # (fs.protected_hardlinks). Mismatched UIDs give you:
+      #   "hard link file chunks/000001: operation not permitted"
+      # and blocks silently never reach the bucket.
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.54.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            # Sidecar requires min == max, and Prometheus compaction off.
+            # PRODUCTION USES 2h. 5m here so you actually see blocks being
+            # cut and uploaded during a lab session.
+            - --storage.tsdb.min-block-duration=5m
+            - --storage.tsdb.max-block-duration=5m
+            - --web.enable-lifecycle
+          ports:
+            - name: web
+              containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+
+        - name: thanos-sidecar
+          image: quay.io/thanos/thanos:v0.36.1
+          args:
+            - sidecar
+            - --prometheus.url=http://localhost:9090
+            - --tsdb.path=/prometheus
+            - --grpc-address=0.0.0.0:10901
+            - --http-address=0.0.0.0:10902
+            # TASK 17 adds the objstore flag here.
+          ports:
+            - name: grpc
+              containerPort: 10901
+            - name: http
+              containerPort: 10902
+          volumeMounts:
+            - name: data
+              mountPath: /prometheus
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-b-config
+        # emptyDir on purpose: this data is NOT durable. Tasks 16-20 are
+        # about fixing exactly that with object storage.
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-b
+  namespace: monitoring
+  labels:
+    app: prometheus
+    replica: b
+spec:
+  type: ClusterIP
+  selector:
+    app: prometheus
+    replica: b
+  ports:
+    - name: web
+      port: 9090
+      targetPort: web
+    - name: grpc
+      port: 10901
+      targetPort: grpc
+

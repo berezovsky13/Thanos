@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 5s
+  # Identical to prometheus-a except for one label: replica: b
+  external_labels:
+    cluster: demo
+    replica: b
+
+scrape_configs:
+  - job_name: podinfo
+    static_configs:
+      - targets: ["podinfo:9898"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

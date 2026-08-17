@@ -1,0 +1,66 @@
+# Thanos Compactor: merges small blocks into big ones, applies retention,
+# and creates downsampled copies (5m and 1h resolution) so that querying a
+# year of data does not read every raw sample.
+#
+# IMPORTANT: exactly ONE compactor may run per bucket. It is a singleton.
+# Running two against the same bucket corrupts it.
+#
+# NOT in the base kustomization. Task 19 applies this file.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thanos-compact
+  namespace: monitoring
+  labels:
+    app: thanos-compact
+spec:
+  replicas: 1                 # never more than 1
+  strategy:
+    type: Recreate            # never two at once, even during a rollout
+  selector:
+    matchLabels:
+      app: thanos-compact
+  template:
+    metadata:
+      labels:
+        app: thanos-compact
+    spec:
+      containers:
+        - name: thanos-compact
+          image: quay.io/thanos/thanos:v0.36.1
+          args:
+            - compact
+            - --wait                       # run continuously, not once
+            - --data-dir=/var/thanos/compact
+            - --objstore.config-file=/etc/thanos/objstore.yml
+            - --http-address=0.0.0.0:10902
+            - --compact.concurrency=1
+            # Retention per resolution. Thanos REFUSES to start if raw
+            # retention is under 40h, because 5m downsampling only kicks in
+            # after that - deleting raw data sooner would leave nothing to
+            # downsample. 1d here makes the pod CrashLoopBackOff with:
+            #   "raw resolution must be higher than the minimum block size
+            #    after which 5m resolution downsampling will occur"
+            - --retention.resolution-raw=2d
+            - --retention.resolution-5m=14d
+            - --retention.resolution-1h=60d
+          ports:
+            - name: http
+              containerPort: 10902
+          volumeMounts:
+            - name: objstore
+              mountPath: /etc/thanos
+            - name: data
+              mountPath: /var/thanos/compact
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: objstore
+          secret:
+            secretName: thanos-objstore
+        - name: data
+          emptyDir: {}

@@ -1,0 +1,115 @@
+# Thanos demo - one global view across two Prometheus instances.
+#
+#   podinfo  <-- scraped by BOTH prometheus-a and prometheus-b
+#
+#   prometheus-a ── sidecar-a ─┐
+#                              ├──> thanos-query ──> Grafana
+#   prometheus-b ── sidecar-b ─┘
+#
+#   docker compose up -d
+#
+# Ports (3000 is deliberately avoided - the tracing lab uses it):
+#   9090  prometheus-a       9091  prometheus-b
+#   10902 thanos-query UI    3001  grafana
+#   9898  podinfo
+
+services:
+  # Something to measure. podinfo exposes Prometheus metrics on /metrics.
+  podinfo:
+    image: stefanprodan/podinfo:6.7.1
+    command: ["./podinfo", "--port=9898"]
+    ports:
+      - "9898:9898"
+
+  # ---- replica A ----------------------------------------------------
+  prometheus-a:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # 2h blocks are what Thanos expects to pick up.
+      - --storage.tsdb.min-block-duration=2h
+      - --storage.tsdb.max-block-duration=2h
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus-a.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-a-data:/prometheus
+    ports:
+      - "9090:9090"
+
+  sidecar-a:
+    image: quay.io/thanos/thanos:v0.36.1
+    command:
+      - sidecar
+      - --prometheus.url=http://prometheus-a:9090
+      - --tsdb.path=/prometheus
+      - --grpc-address=0.0.0.0:10901
+      - --http-address=0.0.0.0:10902
+    volumes:
+      # The sidecar reads the same data directory as its Prometheus.
+      - prom-a-data:/prometheus
+    depends_on:
+      - prometheus-a
+
+  # ---- replica B - identical, different replica label ---------------
+  prometheus-b:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.min-block-duration=2h
+      - --storage.tsdb.max-block-duration=2h
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus-b.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-b-data:/prometheus
+    ports:
+      - "9091:9090"
+
+  sidecar-b:
+    image: quay.io/thanos/thanos:v0.36.1
+    command:
+      - sidecar
+      - --prometheus.url=http://prometheus-b:9090
+      - --tsdb.path=/prometheus
+      - --grpc-address=0.0.0.0:10901
+      - --http-address=0.0.0.0:10902
+    volumes:
+      - prom-b-data:/prometheus
+    depends_on:
+      - prometheus-b
+
+  # ---- the global view ----------------------------------------------
+  # Queries BOTH sidecars and merges the results. --query.replica-label
+  # tells it which label distinguishes duplicates, so it can collapse them.
+  thanos-query:
+    image: quay.io/thanos/thanos:v0.36.1
+    command:
+      - query
+      - --http-address=0.0.0.0:10902
+      - --grpc-address=0.0.0.0:10901
+      - --endpoint=sidecar-a:10901
+      - --endpoint=sidecar-b:10901
+      - --query.replica-label=replica
+    ports:
+      - "10902:10902"
+    depends_on:
+      - sidecar-a
+      - sidecar-b
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports:
+      - "3001:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - thanos-query
+
+volumes:
+  prom-a-data:
+  prom-b-data:

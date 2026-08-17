@@ -1,0 +1,45 @@
+# Two Prometheus configs, identical except for ONE label: replica.
+# That label is what lets Thanos tell the copies apart and deduplicate them.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-a-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+      external_labels:
+        cluster: minikube
+        replica: a
+
+    scrape_configs:
+      - job_name: podinfo
+        static_configs:
+          - targets: ["podinfo.monitoring.svc.cluster.local:9898"]
+
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-b-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+      external_labels:
+        cluster: minikube
+        replica: b
+
+    scrape_configs:
+      - job_name: podinfo
+        static_configs:
+          - targets: ["podinfo.monitoring.svc.cluster.local:9898"]
+
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]

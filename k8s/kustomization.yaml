@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base stack for tasks 1-15:
+#   kubectl apply -k .
+#
+# The objstore/ files are deliberately NOT listed. Tasks 16-20 apply them
+# one at a time with `kubectl apply -f`, so students see each component
+# arrive and what it changes.
+
+resources:
+  - 00-namespace.yaml
+  - app/10-podinfo.yaml
+  - prometheus/20-prometheus-config.yaml
+  - prometheus/21-prometheus-a.yaml
+  - prometheus/22-prometheus-b.yaml
+  - thanos/30-query.yaml
+  - grafana/40-grafana.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      part-of: thanos-lab
