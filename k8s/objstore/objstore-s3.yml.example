@@ -1,0 +1,44 @@
+# Template for the Thanos object-storage config (AWS S3).
+#
+# COPY this file to objstore-s3.yml, fill in your own values, and create the
+# secret from it:
+#
+#   kubectl create secret generic thanos-objstore -n monitoring \
+#       --from-file=objstore.yml=objstore-s3.yml
+#
+# objstore-s3.yml is in .gitignore. NEVER commit it - it holds a live AWS
+# key. If you push one to GitHub, delete the key immediately:
+#   aws iam delete-access-key --user-name thanos-lab --access-key-id AKIA...
+#
+# Every Thanos component that touches the bucket reads this same file:
+# the sidecars, the store gateway and the compactor.
+
+type: S3
+config:
+  # S3 bucket names are globally unique across all of AWS.
+  bucket: CHANGEME-thanos-lab-yourname-12345
+
+  # us-east-1     -> s3.us-east-1.amazonaws.com
+  # eu-west-1     -> s3.eu-west-1.amazonaws.com
+  endpoint: s3.REGION.amazonaws.com
+  region: REGION
+
+  access_key: AKIA_CHANGEME
+  secret_key: CHANGEME
+
+  # For a non-AWS S3-compatible store served over plain http, add:
+  #   insecure: true
+  # Leave it out for AWS - it uses https.
+
+# ON EKS, PREFER NOT DOING THIS AT ALL.
+# With IAM Roles for Service Accounts (IRSA) or Pod Identity you attach an
+# IAM role to the ServiceAccount and the config carries NO keys:
+#
+#   type: S3
+#   config:
+#     bucket: my-thanos-bucket
+#     endpoint: s3.eu-west-1.amazonaws.com
+#     region: eu-west-1
+#
+# The AWS SDK picks the credentials up from the pod identity. Long-lived
+# access keys in a Secret are the teaching version, not the production one.
